@@ -3,11 +3,12 @@ import google.generativeai as genai
 import json
 import io
 from docx import Document
-# Importamos el prompt (asegúrate de que organon_prompts.py sigue en la misma carpeta)
+
+# Intentamos importar el prompt, si falla usamos uno por defecto para evitar errores
 try:
     from organon_prompts import SYSTEM_PROMPT_ZH as SYSTEM_PROMPT 
 except ImportError:
-    SYSTEM_PROMPT = "You are a legal assistant." # Fallback por seguridad
+    SYSTEM_PROMPT = "You are a legal assistant."
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
@@ -68,8 +69,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. CONFIGURACIÓN GEMINI (ROLLBACK A 2.0) ---
-# Usamos el modelo estable actual
+# --- 3. CONFIGURACIÓN GEMINI ---
 MODEL_NAME = "gemini-2.0-flash" 
 
 try:
@@ -114,9 +114,8 @@ def generar_escrito(datos):
     if st.session_state.api_calls >= MAX_CALLS:
         return {"error": "已達到試用版次數限制 (10/10)。(Demo limit reached)"}
     
-    # Configuración para Gemini 2.0
     generation_config = {
-        "temperature": 0.4, # Balance entre creatividad y rigor
+        "temperature": 0.4,
         "top_p": 0.95,
         "max_output_tokens": 8192,
         "response_mime_type": "application/json",
@@ -176,8 +175,8 @@ st.markdown("""
 # --- NUEVO DESCARGO DE RESPONSABILIDAD (DISCLAIMER) ---
 st.warning("""
     **⚠️ 免責聲明 (Disclaimer)**：
-    本應用程式僅提供AI 輔助撰寫 (AI-assisted drafting) 功能，不代表對法律之解釋或適用建議。
-    生成內容僅供參考，可能存在錯誤或過時資訊，請務必經由專業律師 (Professional Lawyer) 審閱、修改後方可使用。
+    本應用程式僅提供 **AI 輔助撰寫 (AI-assisted drafting)** 功能，不代表對法律之解釋或適用建議。
+    生成內容僅供參考，可能存在錯誤或過時資訊，**請務必經由專業律師 (Professional Lawyer) 審閱、修改後方可使用**。
     使用者應自行確認內容之正確性與適法性。
 """)
 # -----------------------------------------------------
@@ -199,4 +198,68 @@ with col1:
 
         # Hechos
         st.markdown("**1. 基礎事實與目標 (Facts)**")
-        hechos = st.text_area("案
+        # CORRECCIÓN AQUÍ: Aseguramos que todo esté en una sola línea
+        hechos = st.text_area("案情事實", height=100, placeholder="請依時間序列描述發生經過...")
+        objetivo = st.text_input("訴之聲明 / 目標", placeholder="例如：請求駁回原告之訴...")
+
+        # Leyes
+        st.markdown("**2. 法源依據 (Legal Basis)**")
+        leyes = st.text_area("引用法條", height=70, placeholder="例如：民法第184條...")
+        with st.expander("進階：引用實務見解 (Jurisprudence)"):
+            jurisprudencia = st.text_area("相關判決字號", height=70)
+
+        # Estrategia
+        st.markdown("**3. 攻防細節 (Details)**")
+        pruebas = st.text_area("關鍵證據", height=70)
+        contraparte = st.text_area("對造主張", height=70)
+        
+        submitted = st.form_submit_button("🚀 生成法律書狀 (Generate)")
+
+with col2:
+    st.markdown("### 📄 書狀預覽 (Preview)")
+    
+    if submitted:
+        if not hechos or not objetivo or not receptor:
+            st.warning("⚠️ 請填寫必要欄位：【受文者】、【案情事實】與【訴之聲明】。")
+        else:
+            with st.spinner(f"⚖️ Organon 正在思考中... (Engine: {MODEL_NAME})"):
+                tono_final = tono if tono else "專業、莊重"
+                
+                datos = {
+                    "receptor": receptor, "tono": tono_final,
+                    "hechos": hechos, "leyes": leyes, "jurisprudencia": jurisprudencia,
+                    "pruebas": pruebas, "contraparte": contraparte, "objetivo": objetivo
+                }
+                resultado = generar_escrito(datos)
+            
+            if "error" in resultado:
+                st.error(f"❌ {resultado['error']}")
+            else:
+                doc_final = resultado.get("documento_final", {})
+                analisis = resultado.get("analisis_estrategico", {})
+                
+                # Visualización
+                with st.expander("🧠 AI 策略分析 (Strategy)", expanded=True):
+                    st.markdown(f"**核心爭點:** {analisis.get('status_causae')}")
+                    st.markdown(f"**防禦策略:** {analisis.get('estrategia_defensa')}")
+
+                titulo = doc_final.get('titulo', '法律書狀')
+                texto = doc_final.get('texto_completo', '')
+                
+                st.markdown(f"#### {titulo}")
+                st.markdown(f"**致：{receptor}**") 
+                st.code(texto, language=None)
+                
+                # Descarga
+                st.markdown("---")
+                docx = crear_documento_word(titulo, texto, analisis, receptor)
+                st.download_button(
+                    label="💾 下載 Word 檔 (.docx)",
+                    data=docx,
+                    file_name=f"{titulo}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    type="primary"
+                )
+
+st.divider()
+st.caption(f"系統狀態：Online | Model: {MODEL_NAME} (Stable) | Calls: {st.session_state.api_calls}/{MAX_CALLS}")
